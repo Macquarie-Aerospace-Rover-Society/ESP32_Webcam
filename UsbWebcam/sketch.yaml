@@ -1,0 +1,5 @@
+# arduino-cli project file: lets `arduino-cli compile` / `upload` run without flags.
+# ESP32S3 Dev Module, ESP32-S3-WROOM-1 N16R8 (16 MB QIO flash, 8 MB octal PSRAM),
+# native USB owned by TinyUSB (webcam), Serial on UART0 (CH343 "UART" port).
+default_fqbn: esp32:esp32:esp32s3:USBMode=default,CDCOnBoot=default,UploadMode=default,FlashSize=16M,FlashMode=qio,PSRAM=opi,PartitionScheme=huge_app
+default_port: COM7

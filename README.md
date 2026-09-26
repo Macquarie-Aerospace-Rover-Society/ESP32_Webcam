@@ -32,6 +32,27 @@ to use the webcam.
 
 The default serial port is `COM7`. Override it with `-Port COM9` (PowerShell) or `PORT=COM9` (make).
 
+### Finding the right board
+
+With several boards connected, `ports` shows which COM port belongs to which board:
+
+```
+Port  Name                      Chip      Side        VID:PID   Serial
+----  ----                      ----      ----        -------   ------
+COM10 USB-Enhanced-SERIAL CH343 WCH CH343 UART bridge 1A86:55D3 5C84325830
+```
+
+- **UART bridge** rows are the boards' **UART** ports. Use that COM number for
+  flash/upload/monitor. The serial number belongs to the board's CH343 chip, so it stays
+  the same whichever USB socket you use, and Windows gives each chip its own COM number.
+- **OTG / native USB** rows are the ESP32-S3 itself (the webcam has no COM port, shown as
+  `-`). With this firmware its serial number is the chip's MAC address, the same value
+  esptool prints as `MAC:`.
+- The list matches by USB chip (WCH, Silicon Labs, FTDI, Espressif), so another gadget
+  using one of those chips would also appear. `-All` / `ALL=1` shows every COM port.
+
+To see which board is which, unplug one: its rows disappear.
+
 ---
 
 ## Build / flash / test commands
@@ -51,6 +72,8 @@ The default serial port is `COM7`. Override it with `-Port COM9` (PowerShell) or
 | snapshot | `.\make.ps1 snapshot -Res 1280x720` | `make snapshot RES=1280x720` | save one frame to `snapshot.jpg` |
 | size | `.\make.ps1 size` | `make size` | firmware binary size |
 | clean | `.\make.ps1 clean` | `make clean` | delete build output |
+| ports | `.\make.ps1 ports` | `make ports` | ESP-related USB devices: COM port, USB chip, serial number |
+| ports (all) | `.\make.ps1 ports -All` | `make ports ALL=1` | every COM port, including Bluetooth and other devices |
 
 `preview` and `snapshot` also accept a frame rate: `-Fps 15` / `FPS=15`.
 

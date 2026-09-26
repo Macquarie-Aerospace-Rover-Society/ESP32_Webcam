@@ -56,8 +56,8 @@
 #define PCLK_GPIO_NUM  13
 
 // Image tweaks - flip these if the picture comes out upside down / mirrored.
-#define CAM_VFLIP        0
-#define CAM_HMIRROR      0
+#define CAM_VFLIP        1
+#define CAM_HMIRROR      1
 #define CAM_JPEG_QUALITY 12  // 0-63, lower = better quality, bigger frames
 
 // ---------------------------------------------------------------------------

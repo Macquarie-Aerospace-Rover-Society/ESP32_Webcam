@@ -7,15 +7,18 @@
   .\make.ps1 monitor -Port COM9
   .\make.ps1 preview -Res 1280x720
   .\make.ps1 preview -Res 640x480 -Fps 30
+  .\make.ps1 ports          # ESP-related USB devices, with serial numbers
+  .\make.ps1 ports -All     # every COM port
 #>
 param(
-  [ValidateSet('help', 'setup', 'build', 'flash', 'upload', 'monitor', 'preview', 'modes', 'snapshot', 'size', 'clean')]
+  [ValidateSet('help', 'setup', 'build', 'flash', 'upload', 'monitor', 'preview', 'modes', 'snapshot', 'size', 'clean', 'ports')]
   [string]$Target = 'help',
   [string]$Port = 'COM7',
   [int]$Baud = 115200,
   [string]$Res = '640x480',
   [string]$Fps = '',
-  [string]$Camera = 'ESP32-S3 UVC Camera'
+  [string]$Camera = 'ESP32-S3 UVC Camera',
+  [switch]$All
 )
 
 $ErrorActionPreference = 'Stop'
@@ -38,6 +41,53 @@ function Invoke-Checked([string]$Exe, [string[]]$ArgList) {
   if ($LASTEXITCODE -ne 0) { throw "$([IO.Path]::GetFileName($Exe)) failed with exit code $LASTEXITCODE" }
 }
 
+# USB chips found on ESP32 boards: VID -> (VID:PID -> name). Matching is by USB chip, so
+# a non-ESP gadget that uses one of these bridges will be listed too.
+$UsbChips = @{
+  '1A86' = @{ '_' = 'WCH USB-serial'; '55D3' = 'WCH CH343'; '7523' = 'WCH CH340'; '55D4' = 'WCH CH9102'; '7522' = 'WCH CH340K' }
+  '10C4' = @{ '_' = 'Silicon Labs USB-serial'; 'EA60' = 'Silicon Labs CP210x' }
+  '0403' = @{ '_' = 'FTDI USB-serial'; '6001' = 'FTDI FT232R'; '6010' = 'FTDI FT2232'; '6015' = 'FTDI FT231X' }
+  '303A' = @{ '_' = 'Espressif native USB'; '1001' = 'Espressif USB Serial/JTAG' }
+}
+
+# One row per device function (COM port, camera, ...) with its USB serial number.
+function Get-UsbDeviceRows([bool]$ComOnly, [bool]$EspOnly) {
+  $devs = Get-PnpDevice -PresentOnly | Where-Object {
+    if ($ComOnly) { $_.Class -eq 'Ports' } else { $_.InstanceId -match '^USB\\VID_' -and $_.Class -ne 'USB' }
+  }
+  foreach ($d in $devs) {
+    $vid = $null; $pid_ = $null; $serial = ''
+    if ($d.InstanceId -match '^USB\\VID_([0-9A-F]{4})&PID_([0-9A-F]{4})') {
+      $vid = $Matches[1]; $pid_ = $Matches[2]
+      # The last part of the instance ID is the device's serial number. Windows makes one up
+      # (it contains '&') when there is none, or for one function of a composite device,
+      # in which case the real serial is on the parent composite device.
+      $id = $d.InstanceId
+      if (($id -split '\\')[-1] -match '&' -and $id -match '&MI_') {
+        $id = (Get-PnpDeviceProperty -InstanceId $d.InstanceId -KeyName DEVPKEY_Device_Parent -ErrorAction SilentlyContinue).Data
+      }
+      $last = if ($id) { ($id -split '\\')[-1] } else { '' }
+      $serial = if ($last -and $last -notmatch '&') { $last } else { '(none)' }
+    }
+    if ($EspOnly -and -not ($vid -and $UsbChips.ContainsKey($vid))) { continue }
+
+    $chip = if ($vid -and $UsbChips.ContainsKey($vid)) {
+      if ($UsbChips[$vid].ContainsKey($pid_)) { $UsbChips[$vid][$pid_] } else { $UsbChips[$vid]['_'] }
+    } elseif ($vid) { 'USB' } else { 'not USB' }
+    $side = if (-not $vid -or -not $UsbChips.ContainsKey($vid)) { '' }
+            elseif ($vid -eq '303A') { 'OTG / native USB' } else { 'UART bridge' }
+
+    [pscustomobject]@{
+      Port    = if ($d.FriendlyName -match '\((COM\d+)\)') { $Matches[1] } else { '-' }
+      Name    = $d.FriendlyName -replace '\s*\(COM\d+\)', ''
+      Chip    = $chip
+      Side    = $side
+      'VID:PID' = if ($vid) { "${vid}:${pid_}" } else { '' }
+      Serial  = $serial
+    }
+  }
+}
+
 function Get-DshowArgs {
   $a = @('-f', 'dshow', '-vcodec', 'mjpeg', '-video_size', $Res)
   if ($Fps) { $a += @('-framerate', $Fps) }
@@ -58,6 +108,7 @@ Targets:
   snapshot  save one frame to snapshot.jpg (uses -Res)
   size      show firmware size
   clean     delete build output
+  ports     list ESP-related USB devices with serial numbers (-All: every COM port)
 "@
   }
   'setup' {
@@ -100,5 +151,18 @@ Targets:
   }
   'clean' {
     if (Test-Path $BuildDir) { Remove-Item -Recurse -Force $BuildDir }
+  }
+  'ports' {
+    $rows = @(Get-UsbDeviceRows -ComOnly $All.IsPresent -EspOnly (-not $All.IsPresent) |
+      Sort-Object @{ Expression = { if ($_.Port -match '\d+') { [int]$Matches[0] } else { [int]::MaxValue } } }, Name)
+    if ($rows.Count -eq 0) {
+      if ($All) { 'No COM ports found.' } else { 'No ESP-related USB devices found. Try: .\make.ps1 ports -All' }
+    } else {
+      $rows | Format-Table -AutoSize | Out-String -Width 200
+      if (-not $All) {
+        'UART bridge      = the "UART" USB-C port: use its COM number for flash/upload/monitor.'
+        'OTG / native USB = the ESP32-S3 itself; with this firmware its serial is the chip MAC.'
+      }
+    }
   }
 }

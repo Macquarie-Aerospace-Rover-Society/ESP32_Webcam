@@ -27,6 +27,23 @@
 #include "esp_camera.h"
 #include "uvc_driver.h"
 #include "device/usbd_pvt.h"
+#include "esp_mac.h"
+
+// Options written by `make.ps1 build` / `make build` (-Name, -AutoName). Not in source
+// control; when it's missing the defaults below apply.
+#if __has_include("build_opts.h")
+#include "build_opts.h"
+#endif
+
+// Name the PC shows for the webcam. With UVC_NAME_FROM_MAC the last 4 hex digits of the
+// chip's MAC are appended ("ESP32-S3 UVC Camera 8050"), so every board gets its own name
+// from the same firmware.
+#ifndef UVC_DEVICE_NAME
+#define UVC_DEVICE_NAME "ESP32-S3 UVC Camera"
+#endif
+#ifndef UVC_NAME_FROM_MAC
+#define UVC_NAME_FROM_MAC 0
+#endif
 
 #if !CONFIG_TINYUSB_VIDEO_ENABLED
 #error "TinyUSB video class is not enabled in this core build"
@@ -109,8 +126,21 @@ static const uint8_t kDefaultMode = 2;  // 1-based frame index -> VGA
   (TUD_VIDEO_DESC_IAD_LEN + TUD_VIDEO_DESC_STD_VC_LEN + (TUD_VIDEO_DESC_CS_VC_LEN + 1) + VC_TERMS_LEN \
    + TUD_VIDEO_DESC_STD_VS_LEN + (TUD_VIDEO_DESC_CS_VS_IN_LEN + 1) + VS_BODY_LEN + 7 /* bulk EP */)
 
+// TinyUSB keeps a pointer to the name, so it lives in a static buffer.
+static char deviceName[48];
+
+static void buildDeviceName() {
+#if UVC_NAME_FROM_MAC
+  uint8_t mac[6];
+  esp_efuse_mac_get_default(mac);  // same MAC esptool prints, and the USB serial number
+  snprintf(deviceName, sizeof(deviceName), "%s %02X%02X", UVC_DEVICE_NAME, mac[4], mac[5]);
+#else
+  snprintf(deviceName, sizeof(deviceName), "%s", UVC_DEVICE_NAME);
+#endif
+}
+
 static uint16_t uvc_load_descriptor(uint8_t *dst, uint8_t *itf) {
-  uint8_t str_index = tinyusb_add_string_descriptor("ESP32-S3 UVC Camera");
+  uint8_t str_index = tinyusb_add_string_descriptor(deviceName);
   uint8_t ep_in = tinyusb_get_free_in_endpoint();
   TU_VERIFY(ep_in != 0);
   ep_in |= 0x80;
@@ -322,6 +352,8 @@ void setup() {
   }
 
   xferDone = xSemaphoreCreateBinary();
+  buildDeviceName();
+  Serial.printf("USB device name: %s\n", deviceName);
 
   // Composite device with an IAD, so Windows/macOS/Linux bind their stock UVC drivers.
   USB.VID(0x303A);
@@ -330,7 +362,7 @@ void setup() {
   USB.usbSubClass(MISC_SUBCLASS_COMMON);
   USB.usbProtocol(MISC_PROTOCOL_IAD);
   USB.manufacturerName("Espressif");
-  USB.productName("ESP32-S3 UVC Camera");
+  USB.productName(deviceName);
   tinyusb_enable_interface(USB_INTERFACE_CUSTOM, UVC_DESC_LEN, uvc_load_descriptor);
   // Double-buffer bulk IN FIFOs so the next packet is already queued when the host
   // polls; with a single 64 B FIFO the host gets NAKed and throughput collapses.

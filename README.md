@@ -30,11 +30,60 @@ to use the webcam.
    .\make.ps1 preview -Res 1280x720
    ```
 
-The default serial port is `COM7`. Override it with `-Port COM9` (PowerShell) or `PORT=COM9` (make).
+### Choosing the board
+
+`flash`, `upload` and `monitor` find the board themselves, so you don't need to know its
+COM port:
+
+- **One ESP board plugged in**: it's used, and the port is printed (`Using COM10  WCH CH343 ...`).
+- **Several boards**: `make.ps1` shows a numbered list and asks which one. `make` can't
+  ask, so it lists them and stops. Re-run it with one of the options below.
+- **None**: it stops with a message. If the board is only connected by its OTG port, it
+  says so, because that port can't be used for flashing.
+
+To choose a board yourself:
+
+| | PowerShell | make |
+|---|---|---|
+| by COM port | `.\make.ps1 flash -Port COM10` | `make flash PORT=COM10` |
+| by USB serial | `.\make.ps1 flash -Serial 5C84325830` | `make flash SERIAL=5C84325830` |
+
+The serial number is the more reliable choice, because it doesn't change if you move the
+cable to a different USB socket.
+
+### Naming the webcam
+
+By default every board shows up as **"ESP32-S3 UVC Camera"**. Options when building or
+flashing:
+
+| | PowerShell | make | Webcam name |
+|---|---|---|---|
+| default | `.\make.ps1 flash` | `make flash` | `ESP32-S3 UVC Camera` |
+| name from MAC | `.\make.ps1 flash -AutoName` | `make flash AUTONAME=1` | `ESP32-S3 UVC Camera 8050` |
+| custom name | `.\make.ps1 flash -Name "Desk Cam"` | `make flash NAME="Desk Cam"` | `Desk Cam` |
+| both | `.\make.ps1 flash -Name "Desk Cam" -AutoName` | `make flash NAME="Desk Cam" AUTONAME=1` | `Desk Cam 8050` |
+
+- With **AutoName**, the firmware reads the chip's MAC address at boot and adds its last
+  4 hex digits. One build therefore gives every board its own name. The digits match the
+  end of the MAC in `ports` (OTG row) and in esptool's `MAC:` line.
+- The boot log shows the result: `USB device name: ESP32-S3 UVC Camera 8050`.
+- Names can be up to 42 characters.
+- The options are written to `UsbWebcam/build_opts.h`, which the sketch includes. It's
+  generated and git-ignored, and rewritten on every build, so options don't carry over
+  from one build to the next. The Arduino IDE also uses this file if it exists, so an IDE
+  build gets whatever options the last `make` build used. Delete the file to go back to
+  the defaults in the sketch.
+- If Windows keeps showing an old name after a reflash, uninstall the camera in Device
+  Manager (Cameras → right-click → Uninstall device) and replug the OTG cable.
+
+`preview`, `snapshot` and `modes` find the webcam themselves, whatever it's called. With
+several ESP webcams plugged in, `make.ps1` asks which one to use. Or choose it yourself
+with `-Camera "<name>"` / `CAMERA="<name>"`, or with `-Serial <MAC>` / `SERIAL=<MAC>`,
+using the OTG row's serial from `ports`.
 
 ### Finding the right board
 
-With several boards connected, `ports` shows which COM port belongs to which board:
+`ports` shows which COM port and serial number belong to which board:
 
 ```
 Port  Name                      Chip      Side        VID:PID   Serial
@@ -80,8 +129,9 @@ To see which board is which, unplug one: its rows disappear.
 If PowerShell refuses to run the script, use
 `powershell -ExecutionPolicy Bypass -File .\make.ps1 flash`.
 
-`UsbWebcam/sketch.yaml` stores the board options and port, so plain
-`arduino-cli compile UsbWebcam` and `arduino-cli upload UsbWebcam` also work.
+`UsbWebcam/sketch.yaml` stores the board options, so plain `arduino-cli compile UsbWebcam`
+works. It has no default port (each board has its own), so give one when uploading
+directly: `arduino-cli upload -p COM10 UsbWebcam`.
 
 ### Arduino IDE instead
 
@@ -97,7 +147,7 @@ Open `UsbWebcam/UsbWebcam.ino` and set **Tools** to:
 | Flash Mode | QIO 80MHz |
 | PSRAM | **OPI PSRAM** |
 | Partition Scheme | Huge APP (3MB No OTA/1MB SPIFFS) |
-| Port | the CH343 port (COM7 here) |
+| Port | the board's CH343 port (`.\make.ps1 ports` shows which one) |
 
 ---
 
@@ -135,6 +185,8 @@ All settings are at the top of [`UsbWebcam/UsbWebcam.ino`](UsbWebcam/UsbWebcam.i
 | `kModes[]` | 4 modes | resolutions offered to the PC (keep in sync with the `MJPEG_FRAME(...)` list) |
 | `kDefaultMode` | `2` | 1-based index of the mode apps get if they don't ask for one (2 = 640×480) |
 | `*_GPIO_NUM` | ESP32-S3-EYE / Freenove layout | camera pins; change these if your board is wired differently |
+| `UVC_DEVICE_NAME` | `"ESP32-S3 UVC Camera"` | webcam name; normally set with `-Name` / `NAME=` (see *Naming the webcam*) |
+| `UVC_NAME_FROM_MAC` | `0` | `1` appends the last 4 MAC digits; normally set with `-AutoName` / `AUTONAME=1` |
 | `USB.VID/PID` | `0x303A:0x80C5` | USB IDs (a development PID) |
 
 ---
@@ -232,7 +284,8 @@ ESPCam/
     ├── UsbWebcam.ino     camera setup, UVC descriptors, streaming task
     ├── uvc_driver.c      patched TinyUSB UVC class driver (see above)
     ├── uvc_driver.h      its streaming API
-    └── sketch.yaml       arduino-cli board options + default port
+    ├── sketch.yaml       arduino-cli board options
+    └── build_opts.h      generated by build (-Name / -AutoName); git-ignored
 ```
 
 TinyUSB (and so `uvc_driver.c`) is MIT-licensed. Its original copyright header is kept
